@@ -4,10 +4,15 @@
 //|    v4: Bug fixes (PipValue, fractal swing, SL, grid race) +      |
 //|        BOS confirmation, trailing profit, capped lot scaling,    |
 //|        smart weekend hedge, midnight-safe session times          |
+//|    v4.01: News filter now blocks grid additions on an ALREADY    |
+//|        active basket, not just new entries. Previously the grid  |
+//|        kept averaging into news-driven spikes (e.g. FOMC) with   |
+//|        zero awareness of the news window. Also added optional   |
+//|        pre-news basket flatten (InpFlattenBeforeNews).           |
 //+------------------------------------------------------------------+
 #property copyright "PCG GoldHedger v4"
 #property link      "peopleconnectglobal.com"
-#property version   "4.00"
+#property version   "4.01"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -129,6 +134,7 @@ input bool     InpUseNewsFilter      = true;
 input int      InpNewsMinutesBefore  = 30;
 input int      InpNewsMinutesAfter   = 30;
 input int      InpNewsImportance     = 3;
+input bool     InpFlattenBeforeNews  = false;    // v4.1: close active basket when news window opens (locks in current P&L)
 
 input group "=== DRAWDOWN PROTECTION ==="
 input double   InpMaxDrawdownPct     = 10.0;
@@ -282,10 +288,11 @@ int OnInit()
    ScanExistingPositions();
    UpdateActiveSession();
 
-   Print("GoldHedgerPro v4.00 initialized | Magic: ", InpMagicNumber,
+   Print("GoldHedgerPro v4.01 initialized | Magic: ", InpMagicNumber,
          " | Entry: ", EntryModeToString(InpEntryMode),
          " | PipValue: ", DoubleToString(PipValue, Digits__ + 1),
-         " | EmergencySL: ", InpUseEmergencySL ? DoubleToString(InpEmergencySLPips, 0) + " pips" : "OFF");
+         " | EmergencySL: ", InpUseEmergencySL ? DoubleToString(InpEmergencySLPips, 0) + " pips" : "OFF",
+         " | NewsBlocksGridAdds: true | FlattenBeforeNews: ", InpFlattenBeforeNews);
 
    return INIT_SUCCEEDED;
 }
@@ -317,7 +324,33 @@ void OnTick()
    if(Basket.active) {
       UpdateBasketProfit();
       if(CheckBasketExit()) return;
-      CheckGridAddPosition();
+
+      // v4.1 FIX: grid additions were previously unconditional, meaning the
+      // martingale grid kept averaging into news-driven moves with no
+      // awareness of the news filter or spread blowout. Both must now be
+      // clear before adding another position to an active basket.
+      bool newsBlocking   = InpUseNewsFilter && IsHighImpactNews();
+      bool spreadBlocking = IsSpreadTooHigh();
+
+      if(newsBlocking) {
+         Print("Grid add PAUSED: high-impact news window active");
+      } else if(spreadBlocking) {
+         Print("Grid add PAUSED: spread too high (", SymbolInfoInteger(Symbol(), SYMBOL_SPREAD), " pts)");
+      } else {
+         CheckGridAddPosition();
+      }
+
+      // v4.1: optionally flatten the basket ahead of high-impact news rather
+      // than just freezing the grid. Off by default — closing early locks in
+      // whatever loss currently exists, which is a deliberate trade-off the
+      // user must opt into, not a default behavior. No re-entry guard needed:
+      // ResetBasket() sets active=false, so this block can't fire again until
+      // a brand-new basket opens (and new entries are themselves news-gated).
+      if(InpFlattenBeforeNews && newsBlocking) {
+         CloseAllBasketPositions("Pre-news flatten: high-impact news window");
+         ResetBasket();
+         return;
+      }
    }
 
    ManageWeekendHedge();
@@ -1063,9 +1096,9 @@ void ResetBasket()
    Basket.lastSellPrice   = 0;
    Basket.nextBuyLot      = CalculateLotForLevel(0);
    Basket.nextSellLot     = CalculateLotForLevel(0);
-   Basket.active          = false;
-   Basket.isSweepEntry    = false;
-   Basket.targetUSD       = InpBasketProfitUSD;
+   Basket.active        = false;
+   Basket.isSweepEntry  = false;
+   Basket.targetUSD     = InpBasketProfitUSD;
 }
 
 //+------------------------------------------------------------------+
@@ -1119,7 +1152,7 @@ void UpdateInfoPanel()
                       : StringFormat("%.2f%% / %.0f%%", dailyLoss, InpMaxDailyLossPct);
 
    string panel = StringFormat(
-      "==== GoldHedger Pro v4.00 ====\n"
+      "==== GoldHedger Pro v4.01 ====\n"
       "Balance:   $%.2f\n"
       "Equity:    $%.2f\n"
       "Peak:      $%.2f (drop %.2f%%)\n"
