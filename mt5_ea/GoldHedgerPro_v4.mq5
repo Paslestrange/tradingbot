@@ -131,10 +131,13 @@ input int      InpTrendEMAPeriod     = 50;
 
 input group "=== TIER 1: NEWS FILTER ==="
 input bool     InpUseNewsFilter      = true;
-input int      InpNewsMinutesBefore  = 30;
-input int      InpNewsMinutesAfter   = 30;
+input int      InpNewsMinutesBefore  = 30;       // Block starts this many minutes before the event
 input int      InpNewsImportance     = 3;
 input bool     InpFlattenBeforeNews  = false;    // v4.1: close active basket when news window opens (locks in current P&L)
+input group "=== V4.2: NEWS SETTLE (dynamic post-news block) ==="
+input int      InpNewsSettleMinMinutes = 15;     // Minimum minutes after event before checking if settled
+input double   InpNewsSettleATRMult    = 1.3;    // Resume only once ATR <= baseline ATR * this multiplier
+input int      InpNewsMaxBlockMinutes  = 120;    // Hard cap — force resume after this long regardless of volatility
 
 input group "=== DRAWDOWN PROTECTION ==="
 input double   InpMaxDrawdownPct     = 10.0;
@@ -220,6 +223,11 @@ bool           DailyLossLimitHit     = false;
 datetime       LastSweepTime         = 0;
 int            LastSweepDirection    = 0;
 double         SweepConfirmLevel     = 0;   // v4: BOS level price must cross before entry
+
+// v4.2: dynamic news cooldown state
+bool           NewsCooldownActive    = false;
+datetime       ActiveNewsEventTime   = 0;   // the event currently being waited out
+double         PreNewsATR            = 0;   // ATR snapshot captured when cooldown started
 
 ENUM_SESSION   CurrentSession        = SESSION_NONE;
 SessionParams  ActiveParams;
@@ -321,6 +329,12 @@ void OnTick()
       return;
    }
 
+   // v4.2: evaluated once per tick — starts blocking InpNewsMinutesBefore
+   // ahead of a high-impact event, then keeps blocking dynamically until
+   // ATR and spread settle back near pre-news levels (capped by
+   // InpNewsMaxBlockMinutes so it can never block forever).
+   bool newsBlocking = CheckNewsCooldown();
+
    if(Basket.active) {
       UpdateBasketProfit();
       if(CheckBasketExit()) return;
@@ -329,7 +343,6 @@ void OnTick()
       // martingale grid kept averaging into news-driven moves with no
       // awareness of the news filter or spread blowout. Both must now be
       // clear before adding another position to an active basket.
-      bool newsBlocking   = InpUseNewsFilter && IsHighImpactNews();
       bool spreadBlocking = IsSpreadTooHigh();
 
       if(newsBlocking) {
@@ -368,7 +381,7 @@ void OnTick()
    if(IsFridayCooldown())                                     return;
    if(InpUseSessionProfiles && !ActiveParams.enabled)         return;
    if(IsInCoolingOff())                                       return;
-   if(InpUseNewsFilter && IsHighImpactNews())                 return;
+   if(newsBlocking)                                           return;
 
    if(!Basket.active) {
       CheckEntrySignal();
@@ -944,13 +957,15 @@ bool CheckDailyLossLimit()
 }
 
 //+------------------------------------------------------------------+
-//| NEWS FILTER — v4: checks USD and EUR (both affect Gold)          |
+//| v4.2: NEWS FILTER — finds the nearest qualifying high-impact      |
+//|   event (USD/EUR) within [now - maxBlockMinutes, now + before]   |
+//|   so a just-started cooldown is also detected after EA restart.  |
 //+------------------------------------------------------------------+
-bool IsHighImpactNews()
+datetime FindNearestHighImpactEvent(datetime now)
 {
-   datetime now  = TimeCurrent();
-   datetime from = now - InpNewsMinutesAfter  * 60;
-   datetime to   = now + InpNewsMinutesBefore * 60;
+   datetime from = now - InpNewsMaxBlockMinutes * 60;
+   datetime to   = now + InpNewsMinutesBefore   * 60;
+   datetime best = 0;
 
    string currencies[] = {"USD", "EUR"};
    for(int c = 0; c < ArraySize(currencies); c++) {
@@ -959,14 +974,69 @@ bool IsHighImpactNews()
       for(int i = 0; i < count; i++) {
          MqlCalendarEvent ev;
          if(!CalendarEventById(values[i].event_id, ev)) continue;
-         if((int)ev.importance >= InpNewsImportance) {
-            long minsTo = (values[i].time - now) / 60;
-            if(MathAbs(minsTo) <= MathMax(InpNewsMinutesBefore, InpNewsMinutesAfter))
-               return true;
-         }
+         if((int)ev.importance < InpNewsImportance) continue;
+         if(best == 0 || MathAbs((long)(values[i].time - now)) < MathAbs((long)(best - now)))
+            best = values[i].time;
       }
    }
-   return false;
+   return best;
+}
+
+//+------------------------------------------------------------------+
+//| v4.2: NEWS COOLDOWN — starts InpNewsMinutesBefore ahead of an     |
+//|   event, then instead of resuming after a fixed time, waits for  |
+//|   ATR to fall back near its pre-news baseline AND spread to      |
+//|   normalize. InpNewsMaxBlockMinutes hard-caps the wait so the EA |
+//|   can never get stuck blocked forever.                           |
+//| Returns true while trading should stay blocked.                  |
+//+------------------------------------------------------------------+
+bool CheckNewsCooldown()
+{
+   if(!InpUseNewsFilter) return false;
+
+   datetime now = TimeCurrent();
+
+   if(!NewsCooldownActive) {
+      datetime eventTime = FindNearestHighImpactEvent(now);
+      if(eventTime == 0) return false;
+
+      // Event already fully expired beyond our max block window — ignore it
+      if(now > eventTime && (now - eventTime) >= InpNewsMaxBlockMinutes * 60) return false;
+
+      NewsCooldownActive  = true;
+      ActiveNewsEventTime = eventTime;
+      PreNewsATR          = GetATRValue();
+      Print("News cooldown STARTED | event: ", TimeToString(eventTime),
+            " | baseline ATR: ", DoubleToString(PreNewsATR, Digits__ + 1));
+   }
+
+   // Still in the pre-news lead-in window
+   if(now < ActiveNewsEventTime) return true;
+
+   int minutesSinceEvent = (int)((now - ActiveNewsEventTime) / 60);
+
+   // Hard cap — force resume even if volatility hasn't normalized
+   if(minutesSinceEvent >= InpNewsMaxBlockMinutes) {
+      Print("News cooldown ENDED (max wait ", InpNewsMaxBlockMinutes, " min reached)");
+      NewsCooldownActive = false;
+      return false;
+   }
+
+   // Minimum settle time must pass before we even check volatility
+   if(minutesSinceEvent < InpNewsSettleMinMinutes) return true;
+
+   double currentATR  = GetATRValue();
+   bool   atrSettled   = (PreNewsATR <= 0) || (currentATR <= PreNewsATR * InpNewsSettleATRMult);
+   bool   spreadSettled = !IsSpreadTooHigh();
+
+   if(atrSettled && spreadSettled) {
+      Print("News cooldown ENDED (settled after ", minutesSinceEvent, " min) | ATR ",
+            DoubleToString(currentATR, Digits__ + 1), " vs baseline ", DoubleToString(PreNewsATR, Digits__ + 1));
+      NewsCooldownActive = false;
+      return false;
+   }
+
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -1145,7 +1215,11 @@ void UpdateInfoPanel()
                       (LastSweepDirection == +1 ? "BULL" : "BEAR");
    string bosStat   = (SweepConfirmLevel > 0)
       ? DoubleToString(SweepConfirmLevel, Digits__) : "n/a";
-   string newsStat  = InpUseNewsFilter ? (IsHighImpactNews() ? "BLOCKED" : "clear") : "OFF";
+   string newsStat  = !InpUseNewsFilter ? "OFF" :
+                       !NewsCooldownActive ? "clear" :
+                       (TimeCurrent() < ActiveNewsEventTime)
+                          ? "PRE-NEWS (" + TimeToString(ActiveNewsEventTime, TIME_MINUTES) + ")"
+                          : "SETTLING (" + IntegerToString((int)((TimeCurrent() - ActiveNewsEventTime) / 60)) + "m)";
    string coolStat  = IsInCoolingOff() ? TimeToString(CoolingOffUntil, TIME_MINUTES) : "OFF";
    string recovStat = (RecoveryBasketsLeft > 0) ? IntegerToString(RecoveryBasketsLeft) + " left" : "OFF";
    string dailyStat = DailyLossLimitHit ? "LIMIT HIT"
