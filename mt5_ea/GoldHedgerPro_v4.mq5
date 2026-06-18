@@ -296,6 +296,15 @@ int OnInit()
    ScanExistingPositions();
    UpdateActiveSession();
 
+   // v4.2: log server-vs-GMT offset so session windows (defined in server
+   // time) can be sanity-checked against real London/NY trading hours
+   int gmtOffsetHours = (int)MathRound((TimeCurrent() - TimeGMT()) / 3600.0);
+   Print("Server time: ", TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES),
+         " | GMT: ", TimeToString(TimeGMT(), TIME_DATE|TIME_MINUTES),
+         " | Offset: GMT", (gmtOffsetHours >= 0 ? "+" : ""), gmtOffsetHours,
+         " | Current session: ", SessionToString(CurrentSession),
+         " (", ActiveParams.enabled ? "enabled" : "DISABLED", ")");
+
    Print("GoldHedgerPro v4.01 initialized | Magic: ", InpMagicNumber,
          " | Entry: ", EntryModeToString(InpEntryMode),
          " | PipValue: ", DoubleToString(PipValue, Digits__ + 1),
