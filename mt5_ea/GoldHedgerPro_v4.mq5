@@ -9,10 +9,16 @@
 //|        kept averaging into news-driven spikes (e.g. FOMC) with   |
 //|        zero awareness of the news window. Also added optional   |
 //|        pre-news basket flatten (InpFlattenBeforeNews).           |
+//|    v4.02: Dynamic ATR-based news-settle cooldown replaces fixed  |
+//|        post-news window. Session windows (Asian/London/Overlap/  |
+//|        NYClose) and trade start/end recalculated for confirmed   |
+//|        GMT+0 broker server time (previously tuned for an         |
+//|        assumed GMT+2/+3 offset and misaligned with real session  |
+//|        hours).                                                   |
 //+------------------------------------------------------------------+
 #property copyright "PCG GoldHedger v4"
 #property link      "peopleconnectglobal.com"
-#property version   "4.01"
+#property version   "4.02"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -90,8 +96,8 @@ input bool     InpUseSessionProfiles = true;
 
 input group "--- Asian Session ---"
 input bool     InpAsianEnabled       = false;
-input string   InpAsianStart         = "03:00";
-input string   InpAsianEnd           = "10:00";
+input string   InpAsianStart         = "00:00";  // server confirmed GMT+0; Tokyo session ~00:00-08:00 UTC
+input string   InpAsianEnd           = "08:00";
 input double   InpAsianADXMin        = 28.0;
 input double   InpAsianVolThreshold  = 2.0;
 input double   InpAsianATRMult       = 1.0;
@@ -99,8 +105,8 @@ input int      InpAsianMaxPositions  = 3;
 
 input group "--- London Session ---"
 input bool     InpLondonEnabled      = true;
-input string   InpLondonStart        = "10:00";
-input string   InpLondonEnd          = "15:30";
+input string   InpLondonStart        = "08:00";  // London open ~08:00 UTC
+input string   InpLondonEnd          = "13:00";  // until NY/overlap begins
 input double   InpLondonADXMin       = 20.0;
 input double   InpLondonVolThreshold = 1.5;
 input double   InpLondonATRMult      = 1.3;
@@ -108,8 +114,8 @@ input int      InpLondonMaxPositions = 4;
 
 input group "--- London/NY Overlap ---"
 input bool     InpOverlapEnabled     = true;
-input string   InpOverlapStart       = "15:30";
-input string   InpOverlapEnd         = "19:00";
+input string   InpOverlapStart       = "13:00";  // NY open / London-NY overlap, highest liquidity
+input string   InpOverlapEnd         = "17:00";  // London close ~17:00 UTC
 input double   InpOverlapADXMin      = 18.0;
 input double   InpOverlapVolThreshold = 1.3;
 input double   InpOverlapATRMult     = 1.5;
@@ -117,8 +123,8 @@ input int      InpOverlapMaxPositions = 5;
 
 input group "--- NY Close ---"
 input bool     InpNYCloseEnabled     = true;
-input string   InpNYCloseStart       = "19:00";
-input string   InpNYCloseEnd         = "21:30";
+input string   InpNYCloseStart       = "17:00";  // NY afternoon, tapering liquidity into close
+input string   InpNYCloseEnd         = "21:00";  // FX/gold weekday close ~21:00-22:00 UTC
 input double   InpNYCloseADXMin      = 25.0;
 input double   InpNYCloseVolThreshold = 1.7;
 input double   InpNYCloseATRMult     = 1.4;
@@ -159,12 +165,12 @@ input double   InpMaxDailyLossPct    = 3.0;
 
 input group "=== WEEKEND & TIME ==="
 input bool     InpHedgeWeekend       = true;
-input string   InpHedgeTime          = "22:45";
-input string   InpHedgeRelease       = "01:25";
+input string   InpHedgeTime          = "20:45";  // ahead of weekly close, verify vs broker's exact Friday close time
+input string   InpHedgeRelease       = "01:00";  // shortly after Monday reopen, lets spread normalize
 input int      InpFridayCooldownMin  = 90;
 input bool     InpBlockHolidays      = true;
-input string   InpTradeStartTime     = "03:00";
-input string   InpTradeEndTime       = "20:30";
+input string   InpTradeStartTime     = "00:00";  // matches Asian session start (server = GMT+0)
+input string   InpTradeEndTime       = "21:00";  // matches NY close session end
 
 input group "=== EA IDENTITY ==="
 input long     InpMagicNumber        = 11111;
@@ -305,7 +311,7 @@ int OnInit()
          " | Current session: ", SessionToString(CurrentSession),
          " (", ActiveParams.enabled ? "enabled" : "DISABLED", ")");
 
-   Print("GoldHedgerPro v4.01 initialized | Magic: ", InpMagicNumber,
+   Print("GoldHedgerPro v4.02 initialized | Magic: ", InpMagicNumber,
          " | Entry: ", EntryModeToString(InpEntryMode),
          " | PipValue: ", DoubleToString(PipValue, Digits__ + 1),
          " | EmergencySL: ", InpUseEmergencySL ? DoubleToString(InpEmergencySLPips, 0) + " pips" : "OFF",
@@ -1235,7 +1241,7 @@ void UpdateInfoPanel()
                       : StringFormat("%.2f%% / %.0f%%", dailyLoss, InpMaxDailyLossPct);
 
    string panel = StringFormat(
-      "==== GoldHedger Pro v4.01 ====\n"
+      "==== GoldHedger Pro v4.02 ====\n"
       "Balance:   $%.2f\n"
       "Equity:    $%.2f\n"
       "Peak:      $%.2f (drop %.2f%%)\n"
