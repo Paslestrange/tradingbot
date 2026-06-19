@@ -619,8 +619,20 @@ void CheckEntrySignal()
             avgVol /= InpVolumeAvgBars;
             if(volBars[0] >= avgVol * ActiveParams.volThreshold)
                volumeSignal = (diPlus[1] > diMinus[1]) ? +1 : -1;
+            else
+               Print("Vol+ADX: ADX ", DoubleToString(adxMain[1], 1), " OK but volume ",
+                     volBars[0], " < ", DoubleToString(avgVol * ActiveParams.volThreshold, 0), " threshold");
+         } else {
+            // v4.02: previously silent — on a fresh chart/symbol this can fail for many
+            // bars in a row if tick-volume history hasn't backfilled yet, blocking every
+            // entry with zero trace in the log.
+            Print("Vol+ADX signal skipped: insufficient tick-volume history (need ",
+                  InpVolumeAvgBars + 1, " bars on entry TF)");
          }
       }
+   } else {
+      // v4.02: previously silent — same issue as above but for the ADX buffer itself.
+      Print("Vol+ADX signal skipped: insufficient ADX history on entry TF (handle ", ADXHandle, ")");
    }
 
    // --- Sweep signal ---
@@ -668,7 +680,12 @@ void CheckEntrySignal()
    // --- Trend filter — applied to ALL entry types (sweeps ARE trend-aligned entries) ---
    if(InpUseTrendFilter) {
       double emaH1[2];
-      if(CopyBuffer(TrendEMAHandle, 0, 0, 2, emaH1) < 2) return;
+      if(CopyBuffer(TrendEMAHandle, 0, 0, 2, emaH1) < 2) {
+         // v4.02: previously silent — blocks every entry with zero trace in the log
+         // if the H1 EMA history hasn't backfilled yet (e.g. fresh chart/symbol).
+         Print("Entry skipped: insufficient H1 EMA history for trend filter (handle ", TrendEMAHandle, ")");
+         return;
+      }
       double price = SymbolInfoDouble(Symbol(), SYMBOL_BID);
       int trendDir = (price > emaH1[1]) ? +1 : -1;
       if(finalSignal != trendDir) {
