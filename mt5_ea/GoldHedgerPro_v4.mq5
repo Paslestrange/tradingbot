@@ -234,6 +234,7 @@ double         SweepConfirmLevel     = 0;   // v4: BOS level price must cross be
 bool           NewsCooldownActive    = false;
 datetime       ActiveNewsEventTime   = 0;   // the event currently being waited out
 double         PreNewsATR            = 0;   // ATR snapshot captured when cooldown started
+datetime       LastResolvedNewsEvent = 0;   // prevents re-triggering the same event every tick
 
 ENUM_SESSION   CurrentSession        = SESSION_NONE;
 SessionParams  ActiveParams;
@@ -1032,8 +1033,14 @@ bool CheckNewsCooldown()
       datetime eventTime = FindNearestHighImpactEvent(now);
       if(eventTime == 0) return false;
 
+      // Already fully resolved this exact event — don't re-trigger every tick
+      if(eventTime == LastResolvedNewsEvent) return false;
+
       // Event already fully expired beyond our max block window — ignore it
-      if(now > eventTime && (now - eventTime) >= InpNewsMaxBlockMinutes * 60) return false;
+      if(now > eventTime && (now - eventTime) >= InpNewsMaxBlockMinutes * 60) {
+         LastResolvedNewsEvent = eventTime;
+         return false;
+      }
 
       NewsCooldownActive  = true;
       ActiveNewsEventTime = eventTime;
@@ -1050,7 +1057,8 @@ bool CheckNewsCooldown()
    // Hard cap — force resume even if volatility hasn't normalized
    if(minutesSinceEvent >= InpNewsMaxBlockMinutes) {
       Print("News cooldown ENDED (max wait ", InpNewsMaxBlockMinutes, " min reached)");
-      NewsCooldownActive = false;
+      NewsCooldownActive    = false;
+      LastResolvedNewsEvent = ActiveNewsEventTime;
       return false;
    }
 
@@ -1064,7 +1072,8 @@ bool CheckNewsCooldown()
    if(atrSettled && spreadSettled) {
       Print("News cooldown ENDED (settled after ", minutesSinceEvent, " min) | ATR ",
             DoubleToString(currentATR, Digits__ + 1), " vs baseline ", DoubleToString(PreNewsATR, Digits__ + 1));
-      NewsCooldownActive = false;
+      NewsCooldownActive    = false;
+      LastResolvedNewsEvent = ActiveNewsEventTime;
       return false;
    }
 
