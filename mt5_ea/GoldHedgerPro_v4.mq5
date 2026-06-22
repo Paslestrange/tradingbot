@@ -9,7 +9,7 @@
 //|        kept averaging into news-driven spikes (e.g. FOMC) with   |
 //|        zero awareness of the news window. Also added optional   |
 //|        pre-news basket flatten (InpFlattenBeforeNews).           |
-//|    v4.02: Dynamic ATR-based news-settle cooldown replaces fixed  |
+//|    v4.03: Dynamic ATR-based news-settle cooldown replaces fixed  |
 //|        post-news window. Session windows (Asian/London/Overlap/  |
 //|        NYClose) and trade start/end recalculated for confirmed   |
 //|        GMT+0 broker server time (previously tuned for an         |
@@ -18,7 +18,7 @@
 //+------------------------------------------------------------------+
 #property copyright "PCG GoldHedger v4"
 #property link      "peopleconnectglobal.com"
-#property version   "4.02"
+#property version   "4.03"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -277,10 +277,11 @@ int OnInit()
    PointSize = _Point;
    Digits__  = (int)SymbolInfoInteger(Symbol(), SYMBOL_DIGITS);
 
-   // v4 FIX: correct PipValue for XAUUSD (2 digits) vs forex pairs (4/5 digits)
-   // XAUUSD quotes to 2 decimal places: 1 pip = 1 point = _Point
-   // Forex 4-digit pairs: 1 pip = 10 points; 5-digit: 1 pip = 10 points
-   PipValue = (Digits__ >= 4) ? PointSize * 10.0 : PointSize;
+   // v4.3 FIX: correct PipValue across both classic and fractional quoting.
+   // Classic gold (2 digits) / 4-digit forex: 1 pip = 1 point.
+   // Fractional gold (3 digits, e.g. this Exness "m" symbol) / 5-digit forex:
+   // brokers add one extra decimal, so 1 pip = 10 points.
+   PipValue = (Digits__ == 3 || Digits__ == 5) ? PointSize * 10.0 : PointSize;
 
    ADXHandle      = iADX(Symbol(), InpEntryTF, InpADXPeriod);
    ATRHandle      = iATR(Symbol(), InpATRTimeframe, InpATRPeriod);
@@ -312,7 +313,7 @@ int OnInit()
          " | Current session: ", SessionToString(CurrentSession),
          " (", ActiveParams.enabled ? "enabled" : "DISABLED", ")");
 
-   Print("GoldHedgerPro v4.02 initialized | Magic: ", InpMagicNumber,
+   Print("GoldHedgerPro v4.03 initialized | Magic: ", InpMagicNumber,
          " | Entry: ", EntryModeToString(InpEntryMode),
          " | PipValue: ", DoubleToString(PipValue, Digits__ + 1),
          " | EmergencySL: ", InpUseEmergencySL ? DoubleToString(InpEmergencySLPips, 0) + " pips" : "OFF",
@@ -624,7 +625,7 @@ void CheckEntrySignal()
                Print("Vol+ADX: ADX ", DoubleToString(adxMain[1], 1), " OK but volume ",
                      volBars[0], " < ", DoubleToString(avgVol * ActiveParams.volThreshold, 0), " threshold");
          } else {
-            // v4.02: previously silent — on a fresh chart/symbol this can fail for many
+            // v4.03: previously silent — on a fresh chart/symbol this can fail for many
             // bars in a row if tick-volume history hasn't backfilled yet, blocking every
             // entry with zero trace in the log.
             Print("Vol+ADX signal skipped: insufficient tick-volume history (need ",
@@ -632,7 +633,7 @@ void CheckEntrySignal()
          }
       }
    } else {
-      // v4.02: previously silent — same issue as above but for the ADX buffer itself.
+      // v4.03: previously silent — same issue as above but for the ADX buffer itself.
       Print("Vol+ADX signal skipped: insufficient ADX history on entry TF (handle ", ADXHandle, ")");
    }
 
@@ -682,7 +683,7 @@ void CheckEntrySignal()
    if(InpUseTrendFilter) {
       double emaH1[2];
       if(CopyBuffer(TrendEMAHandle, 0, 0, 2, emaH1) < 2) {
-         // v4.02: previously silent — blocks every entry with zero trace in the log
+         // v4.03: previously silent — blocks every entry with zero trace in the log
          // if the H1 EMA history hasn't backfilled yet (e.g. fresh chart/symbol).
          Print("Entry skipped: insufficient H1 EMA history for trend filter (handle ", TrendEMAHandle, ")");
          return;
@@ -1267,7 +1268,7 @@ void UpdateInfoPanel()
                       : StringFormat("%.2f%% / %.0f%%", dailyLoss, InpMaxDailyLossPct);
 
    string panel = StringFormat(
-      "==== GoldHedger Pro v4.02 ====\n"
+      "==== GoldHedger Pro v4.03 ====\n"
       "Balance:   $%.2f\n"
       "Equity:    $%.2f\n"
       "Peak:      $%.2f (drop %.2f%%)\n"

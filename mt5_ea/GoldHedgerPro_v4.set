@@ -8,6 +8,12 @@
 ; demo via the EA's "Offset: GMT+0" startup log line in the Experts tab).
 ; If you switch brokers/accounts, re-check the offset and shift these
 ; times accordingly before trusting the session windows.
+;
+; v4.03: PipValue is now auto-detected from the symbol's quote precision
+; (handles both classic 2-digit and fractional 3-digit XAUUSD quoting).
+; Check the EA's "PipValue: 0.0100" line in the Experts log on init —
+; if it ever shows 0.0010 again, pip-denominated inputs below (grid
+; distance, emergency SL, sweep wick) are running 10x too tight.
 
 ;=== MONEY & LOT MANAGEMENT ===
 InpInitialBalance=500.0
