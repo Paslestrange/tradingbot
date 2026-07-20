@@ -125,6 +125,7 @@ def main():
     print("🚀 Starting Live Trading Loop (Ctrl+C to stop)...")
     
     try:
+        last_candle_time = None
         while True:
             # 1. Get Data
             df = get_market_data(SYMBOL, n=200) # Fetch enough for MA(50) + Window(64)
