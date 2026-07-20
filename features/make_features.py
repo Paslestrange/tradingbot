@@ -70,10 +70,19 @@ def compute_features(df):
     feats = np.nan_to_num(feats, nan=0.0, posinf=0.0, neginf=0.0)
     rets = np.nan_to_num(rets, nan=0.0, posinf=0.0, neginf=0.0)
 
-    # Normalize
-    mu = feats.mean(axis=0, keepdims=True)
-    sig = feats.std(axis=0, keepdims=True) + 1e-8
-    feats = (feats - mu) / sig
+    # Normalize with rolling window (no look-ahead bias)
+    norm_window = 252
+    feats_norm = np.zeros_like(feats)
+    for i in range(1, min(norm_window, len(feats))):
+        mu = feats[:i].mean(axis=0)
+        sig = feats[:i].std(axis=0) + 1e-8
+        feats_norm[i] = (feats[i] - mu) / sig
+    for i in range(norm_window, len(feats)):
+        window = feats[i-norm_window:i]
+        mu = window.mean(axis=0)
+        sig = window.std(axis=0) + 1e-8
+        feats_norm[i] = (feats[i] - mu) / sig
+    feats = feats_norm
     
     return df, feats, rets
 
