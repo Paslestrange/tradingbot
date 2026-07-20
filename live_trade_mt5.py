@@ -1,3 +1,4 @@
+from models.risk_supervisor import RiskSupervisor
 import time
 import numpy as np
 import pandas as pd
@@ -108,6 +109,8 @@ def get_current_position_type():
             
     return 0
 
+risk_supervisor = RiskSupervisor()
+
 def main():
     if not mt5.initialize():
         print("initialize() failed, error code =", mt5.last_error())
@@ -159,6 +162,11 @@ def main():
             print(f"⏰ {datetime.now().strftime('%H:%M:%S')} | Pos: {current_pos} | Action: {action} ({'Long' if action==1 else 'Flat'})")
             
             # 4. Execute
+            # Risk check
+            approved, reason = risk_supervisor.check_trade(action, {'position': current_pos}, {'volatility': 1.0, 'dxy_momentum': 0.0, 'spread': 0.0001})
+            if not approved:
+                print(f"Trade rejected: {reason}")
+                continue
             execute_trade(action, current_pos)
             
             # Sleep until next check (e.g., every 10 seconds or 1 minute)
