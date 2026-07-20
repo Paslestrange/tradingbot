@@ -100,7 +100,14 @@ class RigorousBacktester:
             # Agent decision
             action = self.agent.act(obs)
 
-            # Execute trade if position changes
+            # Execute trade if position changes (next bar execution)
+            if hasattr(self, 'pending_action') and self.pending_action is not None:
+                action = self.pending_action
+                self.pending_action = None
+            else:
+                self.pending_action = action
+                continue
+            
             if action != position:
                 # Close old position
                 if position != 0:
