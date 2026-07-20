@@ -13,7 +13,7 @@ class XAUUSDTradingEnv(gym.Env):
       1 = Long
 
     Position is applied on the NEXT step to avoid look-ahead.
-    Reward = pnl - trade_cost - turnover_penalty - flat_penalty + hold_bonus
+    Reward = pnl - trade_cost - turnover_penalty + hold_bonus
     """
 
     metadata = {"render_modes": ["human"]}
@@ -25,7 +25,7 @@ class XAUUSDTradingEnv(gym.Env):
         window: int = 64,
         cost_per_trade: float = 0.0001,   # cost per unit position change
         turnover_coef: float = 0.0002,     # extra penalty for changing position
-        flat_penalty: float = 0.00002,    # tiny penalty for being flat (nudges to stay exposed)
+        flat_penalty: float = 0.0,          # deprecated: kept for API compatibility, no longer used
         hold_bonus: float = 0.00002,      # tiny bonus for NOT changing position (nudges stability)
         max_episode_steps: int | None = None,
     ):
@@ -86,13 +86,10 @@ class XAUUSDTradingEnv(gym.Env):
         # pnl from holding PREVIOUS position over this bar
         pnl = self.pos * self.r[self.t]
 
-        # penalize being flat (nudges agent to stay exposed in drift markets)
-        flat_pen = self.flat_penalty if new_pos == 0 else 0.0
-
         # bonus for holding the same position (nudges stability, reduces flip-flop)
         hold_bonus = self.hold_bonus if delta == 0 else 0.0
 
-        reward = pnl - trade_cost - turnover_penalty - flat_pen + hold_bonus
+        reward = pnl - trade_cost - turnover_penalty + hold_bonus
 
         # track equity
         self.equity *= (1.0 + reward)

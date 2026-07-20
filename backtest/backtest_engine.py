@@ -92,55 +92,57 @@ class RigorousBacktester:
         equity = self.initial_capital
         position = 0
         entry_price = 0
+        entry_time = None
+        pending_action = None  # Signal generated on bar N, executed on bar N+1
 
         for idx, row in self.data.iterrows():
             # Get observation (simplified)
             obs = self._get_observation(idx)
 
-            # Agent decision
-            action = self.agent.act(obs)
+            # Agent decision for THIS bar
+            current_action = self.agent.act(obs)
 
-            # Execute trade if position changes (next bar execution)
-            if hasattr(self, 'pending_action') and self.pending_action is not None:
-                action = self.pending_action
-                self.pending_action = None
-            else:
-                self.pending_action = action
-                continue
-            
-            if action != position:
-                # Close old position
-                if position != 0:
-                    exit_price = row['close']
-                    exit_cost = self._compute_total_cost(row)
+            # Execute PENDING action from previous bar at THIS bar's open
+            if pending_action is not None:
+                action = pending_action
+                pending_action = None  # Clear pending
 
-                    # P&L
-                    if position == 1:  # Was long
-                        pnl = (exit_price - entry_price) / entry_price - exit_cost
-                    else:  # Was short
-                        pnl = (entry_price - exit_price) / entry_price - exit_cost
+                if action != position:
+                    # Close old position
+                    if position != 0:
+                        exit_price = row['open']
+                        exit_cost = self._compute_total_cost(row)
 
-                    equity *= (1 + pnl)
+                        # P&L
+                        if position == 1:  # Was long
+                            pnl = (exit_price - entry_price) / entry_price - exit_cost
+                        else:  # Was short
+                            pnl = (entry_price - exit_price) / entry_price - exit_cost
 
-                    # Record trade
-                    results['trades'].append({
-                        'entry_time': entry_time,
-                        'exit_time': idx,
-                        'entry_price': entry_price,
-                        'exit_price': exit_price,
-                        'pnl': pnl,
-                        'position': position,
-                        'cost': exit_cost,
-                    })
+                        equity *= (1 + pnl)
 
-                # Open new position
-                if action != 0:
-                    entry_price = row['close']
-                    entry_time = idx
-                    entry_cost = self._compute_total_cost(row)
-                    equity *= (1 - entry_cost)  # Pay entry cost
+                        # Record trade
+                        results['trades'].append({
+                            'entry_time': entry_time,
+                            'exit_time': idx,
+                            'entry_price': entry_price,
+                            'exit_price': exit_price,
+                            'pnl': pnl,
+                            'position': position,
+                            'cost': exit_cost,
+                        })
 
-                position = action
+                    # Open new position
+                    if action != 0:
+                        entry_price = row['open']
+                        entry_time = idx
+                        entry_cost = self._compute_total_cost(row)
+                        equity *= (1 - entry_cost)  # Pay entry cost
+
+                    position = action
+
+            # Store current decision as pending for next bar
+            pending_action = current_action
 
             results['equity_curve'].append(equity)
 
@@ -409,6 +411,7 @@ if __name__ == "__main__":
     # Mock data
     dates = pd.date_range('2023-01-01', periods=1000, freq='H')
     data = pd.DataFrame({
+        'open': 2000 + np.random.randn(1000).cumsum() * 10,
         'close': 2000 + np.random.randn(1000).cumsum() * 10,
         'high': 2000 + np.random.randn(1000).cumsum() * 10 + 5,
         'low': 2000 + np.random.randn(1000).cumsum() * 10 - 5,

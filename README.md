@@ -1,5 +1,9 @@
 # 🤖 DRL Trading Bot - XAUUSD
 
+> **⚠️ WORK IN PROGRESS - NOT PRODUCTION READY**
+> 
+> This is an experimental research project being actively fixed and refactored. The codebase has known issues and should NOT be used for live trading with real money. Use only for educational and research purposes.
+
 > An advanced AI-powered trading system using Deep Reinforcement Learning to trade gold (XAUUSD) autonomously. Built with 140+ market features, multi-timeframe analysis, and state-of-the-art RL algorithms.
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -155,17 +159,23 @@ Three pre-configured strategies for different risk profiles:
 
 ---
 
-## 📊 Performance Targets
+## 📊 Performance Status
 
-| Metric | Target | Explanation |
-|--------|--------|-------------|
-| **Annual Return** | 80-120%+ | Expected yearly profit |
-| **Sharpe Ratio** | 3.5-4.5+ | Risk-adjusted returns (>2 is excellent) |
-| **Max Drawdown** | <8% | Largest peak-to-valley loss |
-| **Win Rate** | 60-65% | Percentage of profitable trades |
-| **Profit Factor** | 2.5-3.0+ | Gross profit / Gross loss |
+**⚠️ No validated performance metrics available yet.**
 
-**Note**: These are targets based on backtesting. Real performance depends on market conditions, slippage, and execution quality.
+This project is currently being fixed and refactored. Historical backtest results showing high returns have not been validated for:
+- **Look-ahead bias**: The model may have accidentally used future information during training
+- **Overfitting**: The model may have memorized historical patterns rather than learned generalizable strategies
+- **Survivorship bias**: Results may only reflect scenarios where the strategy happened to work
+- **Real-world execution**: Slippage, latency, and market impact can severely degrade performance
+
+**Before trusting any backtest results**, you must:
+1. Validate on truly out-of-sample data (different time periods, different market conditions)
+2. Run extensive forward testing on demo accounts (minimum 2-3 months)
+3. Audit the feature engineering pipeline for data leakage
+4. Stress-test across multiple market regimes (crashes, high volatility, low liquidity)
+
+**Do NOT use this for live trading with real money until these validations are complete.**
 
 ---
 
@@ -591,10 +601,10 @@ python backtest/backtest_engine.py --model train/ppo_xauusd_latest.zip
 Tests model performance on out-of-sample data (data it hasn't seen during training).
 
 **What to look for:**
-- Positive returns
-- Sharpe ratio > 2.0
-- Max drawdown < 15%
+- Positive returns (even modest ones are meaningful)
 - Consistent performance across different time periods
+- Drawdown that doesn't blow up the account
+- No evidence of data leakage or look-ahead bias
 
 ### Crisis Validation
 ```bash
@@ -612,30 +622,18 @@ Tests how the bot performs during market crashes:
 
 ## 📈 Expected Results
 
-### Backtesting (Historical Data)
-Based on 2015-2023 XAUUSD data:
-- Annual return: 60-90%
-- Sharpe ratio: 2.8-3.5
-- Max drawdown: 8-12%
-- Win rate: 58-62%
+**There are no reliable expected results at this time.**
 
-### Forward Testing (Unseen Data)
-Performance typically 20-30% lower than backtest:
-- Annual return: 40-70%
-- Sharpe ratio: 2.0-2.8
-- Max drawdown: 10-15%
+The codebase is undergoing significant fixes. Any performance numbers from backtests are provisional and may be inflated due to:
 
-### Live Trading (Real Money)
-Expected performance after accounting for slippage, spreads, execution delays:
-- Annual return: 30-60%
-- Sharpe ratio: 1.8-2.5
-- Max drawdown: 12-18%
+1. **Data leakage** - Features computed on the full dataset before train/test split
+2. **Look-ahead bias** - Indicators that implicitly use future price data
+3. **Overfitting** - The model adapts to noise in the training period
+4. **Unrealistic execution assumptions** - Backtests may not fully model slippage, spread costs, or latency
 
-**Why the difference?**
-- Slippage (price moves between signal and execution)
-- Spread costs (bid-ask difference)
-- Latency (delays in order execution)
-- Market impact (your orders affect prices)
+In quantitative finance, a well-implemented strategy that shows 30%+ annual returns in backtest often delivers significantly less in live trading. A Sharpe ratio above 2.0 is exceptionally rare even for professional quant funds.
+
+**Treat all backtest metrics with extreme skepticism until validated with rigorous out-of-sample testing.**
 
 ---
 

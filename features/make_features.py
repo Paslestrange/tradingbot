@@ -70,17 +70,19 @@ def compute_features(df):
     feats = np.nan_to_num(feats, nan=0.0, posinf=0.0, neginf=0.0)
     rets = np.nan_to_num(rets, nan=0.0, posinf=0.0, neginf=0.0)
 
-    # Normalize with rolling window (no look-ahead bias)
+    # Normalize with expanding window for first norm_window bars,
+    # then rolling window — no look-ahead bias (only uses feats[:i] at index i)
     norm_window = 252
     feats_norm = np.zeros_like(feats)
-    for i in range(1, min(norm_window, len(feats))):
-        mu = feats[:i].mean(axis=0)
-        sig = feats[:i].std(axis=0) + 1e-8
-        feats_norm[i] = (feats[i] - mu) / sig
-    for i in range(norm_window, len(feats)):
-        window = feats[i-norm_window:i]
-        mu = window.mean(axis=0)
-        sig = window.std(axis=0) + 1e-8
+    for i in range(1, len(feats)):
+        if i < norm_window:
+            # Expanding window: use all data up to (not including) current bar
+            history = feats[:i]
+        else:
+            # Rolling window: use only the past norm_window bars
+            history = feats[i - norm_window:i]
+        mu = history.mean(axis=0)
+        sig = history.std(axis=0) + 1e-8
         feats_norm[i] = (feats[i] - mu) / sig
     feats = feats_norm
     

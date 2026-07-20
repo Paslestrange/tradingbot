@@ -8,6 +8,7 @@ from stable_baselines3 import PPO
 from metaapi_cloud_sdk import MetaApi
 
 from features.make_features import compute_features
+from models.risk_supervisor import RiskSupervisor
 
 # Suppress MetaAPI internal error logs completely
 import warnings
@@ -36,6 +37,41 @@ VOLUME = 0.01
 MODEL_PATH = "train/ppo_xauusd_latest.zip"
 WINDOW = 64
 MAGIC_NUMBER = 234000
+
+# --- RISK SUPERVISOR ---
+risk_supervisor = RiskSupervisor()
+last_reset_date = None
+
+
+def build_market_data(df):
+    """Build real market_data dict for risk supervisor from live dataframe."""
+    volatility = float(df['vol'].iloc[-1]) if 'vol' in df.columns else 0.0
+    volatility_scaled = volatility * np.sqrt(252 * 24)
+
+    recent = df.tail(5)
+    spread = float(((recent['high'] - recent['low']) / recent['close']).mean())
+
+    dxy_momentum = 0.0
+    if 'dxy_close' in df.columns:
+        dxy_momentum = float(df['dxy_close'].pct_change(24).iloc[-1])
+
+    return {
+        'volatility': volatility_scaled,
+        'spread': spread,
+        'dxy_momentum': dxy_momentum,
+        'is_high_impact_event': False,
+        'is_event_window': False,
+        'is_market_open': True,
+    }
+
+
+def maybe_reset_daily():
+    """Call reset_daily once per UTC calendar day."""
+    global last_reset_date
+    today = datetime.utcnow().date()
+    if last_reset_date is None or today != last_reset_date:
+        risk_supervisor.reset_daily()
+        last_reset_date = today
 
 async def get_market_data(account, symbol, n=1000, max_retries=3):
     """Fetch recent candles from MetaAPI Account with retry logic"""
@@ -97,14 +133,31 @@ async def get_current_position(connection):
         print(f"❌ Error checking positions: {e}")
         return 0, None
 
-async def run_step(account, connection, model):
+async def run_step(account, connection, model, last_candle_time):
+    """Returns (last_candle_time, processed) tuple"""
     df = await get_market_data(account, SYMBOL, n=1000)
-    if df is None: return
+    if df is None:
+        return last_candle_time, False
+
+    # Check for new completed candle (prevent duplicate orders)
+    # df.iloc[-1] is current forming candle, df.iloc[-2] is last completed
+    if len(df) < 2:
+        print("⏳ Waiting for candle data...")
+        return last_candle_time, False
+        
+    current_candle_time = df.iloc[-2]['time']  # Last completed candle
+    
+    if last_candle_time is not None and current_candle_time == last_candle_time:
+        # No new candle completed, skip processing to prevent duplicate orders
+        return last_candle_time, False
+    
+    # New candle completed, process signal
+    last_candle_time = current_candle_time
 
     _, feats, _ = compute_features(df)
     if len(feats) < WINDOW:
         print("⏳ Not enough data yet...")
-        return
+        return last_candle_time, False
     
     obs_features = feats[-WINDOW:]
     current_pos_type, pos_id = await get_current_position(connection)
@@ -113,7 +166,7 @@ async def run_step(account, connection, model):
     action, _ = model.predict(obs, deterministic=True)
     action = int(action)
     
-    print(f"⏰ {datetime.now().strftime('%H:%M:%S')} | Pos: {current_pos_type} | Action: {action} ({'Long' if action==1 else 'Flat'})")
+    print(f"⏰ {datetime.now().strftime('%H:%M:%S')} | Candle: {current_candle_time} | Pos: {current_pos_type} | Action: {action} ({'Long' if action==1 else 'Flat'})")
     
     if action == current_pos_type:
         pass
@@ -131,6 +184,8 @@ async def run_step(account, connection, model):
             print(f"✅ Closed: {result['orderId']}")
         except Exception as e:
             print(f"❌ Close Failed: {e}")
+    
+    return last_candle_time, True
 
 async def trade_loop():
     if TOKEN == "YOUR_METAAPI_TOKEN_HERE":
@@ -199,9 +254,13 @@ async def trade_loop():
         print(f"🧠 Model loaded: {MODEL_PATH}")
         print("🚀 Starting Live Trading Loop (Ctrl+C to stop)...")
 
+        last_candle_time = None
         while True:
             try:
-                await asyncio.wait_for(run_step(account, connection, model), timeout=60.0)
+                last_candle_time, _ = await asyncio.wait_for(
+                    run_step(account, connection, model, last_candle_time),
+                    timeout=60.0
+                )
             except asyncio.TimeoutError:
                 print("⚠️ Network timed out. Retrying...")
             except Exception as e:
