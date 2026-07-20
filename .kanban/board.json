@@ -1,0 +1,66 @@
+{
+  "tasks": [
+    {
+      "id": "T001",
+      "title": "Fix feature normalization look-ahead bias",
+      "priority": "critical",
+      "description": "Replace global normalization with rolling window in features/make_features.py",
+      "files": [
+        "features/make_features.py"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "T002",
+      "title": "Fix backtester execution timing",
+      "priority": "critical",
+      "description": "Change backtester to execute on next bar's open, not current bar's close",
+      "files": [
+        "backtest/backtest_engine.py"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "T003",
+      "title": "Wire risk supervisor into live trading",
+      "priority": "critical",
+      "description": "Import and integrate RiskSupervisor into live_trade_mt5.py",
+      "files": [
+        "live_trade_mt5.py"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "T004",
+      "title": "Fix live trading candle detection",
+      "priority": "high",
+      "description": "Implement candle-complete detection to prevent duplicate orders",
+      "files": [
+        "live_trade_mt5.py"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "T005",
+      "title": "Remove environment flat penalty bias",
+      "priority": "medium",
+      "description": "Set flat_penalty to 0.0 in env/xauusd_env.py",
+      "files": [
+        "env/xauusd_env.py"
+      ],
+      "status": "pending"
+    },
+    {
+      "id": "T006",
+      "title": "Add unit tests for core components",
+      "priority": "medium",
+      "description": "Create tests/ directory with unit tests for features, backtester, risk supervisor",
+      "files": [],
+      "status": "pending"
+    }
+  ],
+  "metadata": {
+    "created": "2026-07-20T10:19:37.464372",
+    "last_updated": "2026-07-20T10:19:37.464380"
+  }
+}
