@@ -199,8 +199,12 @@ def git_ensure_main():
 def git_create_branch(name):
     git_ensure_main()
     # Delete existing branch if it somehow exists
-    run(f"git branch -D {name} 2>/dev/null", workdir=WORKSPACE)
-    run(f"git checkout -b {name}", workdir=WORKSPACE)
+    out, err, code = run(f"git branch -D {name} 2>/dev/null", workdir=WORKSPACE)
+    out, err, code = run(f"git checkout -b {name}", workdir=WORKSPACE)
+    if code != 0:
+        log(f"Failed to create branch {name}: {err[:200]}")
+        return False
+    return True
 
 def git_cleanup_dirty():
     """Clean up dirty git state on failure."""
@@ -426,7 +430,11 @@ def main():
     log(f"Working on: {title}")
 
     branch = f"task/{task_id[:8]}-{re.sub(r'[^a-zA-Z0-9]+', '-', title.lower())[:30]}"
-    git_create_branch(branch)
+    if not git_create_branch(branch):
+        log(f"Failed to create branch {branch}, aborting task")
+        print("[SILENT]")
+        release_lock()
+        return
 
     def cleanup_on_failure():
         git_cleanup_dirty()
@@ -469,6 +477,9 @@ def main():
         return
 
     pushed = git_push()
+
+    # Mark task complete
+    run(f"{HERMES_BIN} kanban --board {KANBAN_BOARD} complete {task_id}", timeout=30)
 
     # Build notification and send DIRECTLY to Discord
     files = git_diff_main_names()
